@@ -20,6 +20,11 @@ data class GuideInfo(
     val sites: List<String> = emptyList(),
 )
 
+/** 一份技能写明要用的 App(包名)和网站(域名);都空表示没写。 */
+data class SkillPlaces(val packages: Set<String> = emptySet(), val domains: Set<String> = emptySet()) {
+    val declared: Boolean get() = packages.isNotEmpty() || domains.isNotEmpty()
+}
+
 sealed interface GuideView {
     data class Found(
         val info: GuideInfo, val file: String, val content: String, val truncated: Boolean, val totalChars: Int,
@@ -229,6 +234,20 @@ class GuideCatalog private constructor(
     /** 主机 [host] 所属站点知识写的 pace(认站点的规则同 [siteCommands]);没有为 null。 */
     fun sitePace(host: String): String? =
         SiteMatch.best(host, rows.filter { it.kind == KnowledgeIndex.SITE }) { it.domains }.firstOrNull()?.pace
+
+    /**
+     * 个人技能 [name] 头部写明的 App 和网站,换成包名和域名:写的是 App / 网站知识名的,换成那份知识登记的包名、域名;
+     * 写的本来就是包名、域名的照原样留着(自学的技能写包名,手写的多写知识名)。没有这份个人技能为 null。
+     */
+    fun skillPlaces(name: String): SkillPlaces? {
+        val skill = personalEntries().firstOrNull { it.info.name == name }?.info ?: return null
+        val apps = skill.apps.toSet()
+        val sites = skill.sites.toSet()
+        return SkillPlaces(
+            packages = apps + rows.filter { it.kind == KnowledgeIndex.APP && it.name in apps }.flatMap { it.packages },
+            domains = sites + rows.filter { it.kind == KnowledgeIndex.SITE && it.name in sites }.flatMap { it.domains },
+        )
+    }
 
     /** 包名 [packageName] 所属 App 知识写的 pace(包名在它的 packages 里);没有为 null。 */
     fun appPace(packageName: String): String? =
