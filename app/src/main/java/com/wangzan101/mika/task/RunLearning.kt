@@ -95,7 +95,9 @@ class RunLearning(
         yieldToForeground()
         val events = guarded(emptyList()) { a.events() }
         val used = events.filterIsInstance<RunEvent.SkillUsed>()
-        val skillNotes = recordOutcomes(SkillFollow.followed(events, used, a.tools, catalog::skillPlaces), used, a.end, a.outcome).toMutableList()
+        // 照着做了的技能(只读过的不算):记结果和要不要起草都看它
+        val followed = SkillFollow.followed(events, used, a.tools, catalog::skillPlaces)
+        val skillNotes = recordOutcomes(followed, used, a.end, a.outcome).toMutableList()
         // 试用中的 App 知识和个人技能按同一种结果算:取消的、没判成的不记
         val trial = SkillOutcomes.resultOf(a.end, a.outcome)?.takeIf { it != SkillResult.unreviewed }
         val trialNames = events.filterIsInstance<RunEvent.State>().filter { it.name == "knowledge_trial_used" }.map { it.detail }.distinct()
@@ -123,7 +125,7 @@ class RunLearning(
 
         // 做法只从办成的学:回答如实说没办成、只办了一部分,或没判成的,不起草
         val done = learnable && LearnGate.done(a.end, a.outcome)
-        if (done) draft(a, events, used.map { it.name }.distinct())?.let(skillNotes::add)
+        if (done) draft(a, events, followed.toList())?.let(skillNotes::add)
         // App 知识也从没办成、磕磕绊绊的运行里学(值不值得由 AppKnowledgeDrafter 按经过判)
         if (a.origin == RunOrigin.Ui) skillNotes += draftApps(a, events)
         return RunNotes(a.conversationId, a.runId.orEmpty(), MemoryExtractor.notes(changes), a.usedMemory, skillNotes)
@@ -154,7 +156,7 @@ class RunLearning(
         val runId = a.runId ?: return null
         if (!switches.learnSkills) return null
         if (events.any { it is RunEvent.Replay && it.matched }) return null
-        // 照着个人技能做成的只记一次结果,不再起草
+        // 照着个人技能做成的只记一次结果,不再起草;只是读过、没照着做的不挡起草(这次是自己办成的)
         val followed = used.firstOrNull().takeIf { SkillOutcomes.resultOf(a.end, a.outcome) == SkillResult.verified }
         val done = a.end as? TaskState.Succeeded
         if (Eligibility.check(events, followed, a.tools, done = LearnGate.done(a.end, a.outcome)) != null) return null

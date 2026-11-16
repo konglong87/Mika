@@ -236,16 +236,30 @@ class GuideCatalog private constructor(
         SiteMatch.best(host, rows.filter { it.kind == KnowledgeIndex.SITE }) { it.domains }.firstOrNull()?.pace
 
     /**
-     * 个人技能 [name] 头部写明的 App 和网站,换成包名和域名:写的是 App / 网站知识名的,换成那份知识登记的包名、域名;
-     * 写的本来就是包名、域名的照原样留着(自学的技能写包名,手写的多写知识名)。没有这份个人技能为 null。
+     * 个人技能 [name] 头部写明的 App 和网站,换成包名和域名。每一项按 App / 网站知识的名字、别名认(大小写不计),
+     * 认出来的换成那份知识登记的包名、域名,并顺着 App 与网站知识互相登记的关联一起算(写了网站、实际在它的 App 里做也算);
+     * 认不出来的,长得像包名、域名(带点、没有空格)的照原样留着(自学的技能写包名),别的(显示名、写错的)不算写了,
+     * 免得一项对不上就让这份技能永远认不出照着做了。没有这份个人技能(或它不在用、不在试用)为 null。
      */
     fun skillPlaces(name: String): SkillPlaces? {
-        val skill = personalEntries().firstOrNull { it.info.name == name }?.info ?: return null
-        val apps = skill.apps.toSet()
-        val sites = skill.sites.toSet()
+        val skill = personal?.get(name)?.takeIf { it.status == SkillStatus.active || it.status == SkillStatus.trial } ?: return null
+        val meta = FrontMatter.parse(skill.markdown).first
+        fun many(k: String) = (meta[k] as? List<*>)?.filterIsInstance<String>() ?: listOfNotNull((meta[k] as? String)?.takeIf { it.isNotEmpty() })
+        fun known(kind: String, entry: String) = rows.filter { r ->
+            r.kind == kind && (r.name.equals(entry, true) || r.aliases.any { it.equals(entry, true) } ||
+                entry in r.packages || r.domains.any { it.equals(entry, true) })
+        }
+        fun raw(entry: String) = entry.takeIf { '.' in it && entry.none(Char::isWhitespace) }
+        val entries = many("apps") + many("sites") + many("domains")
+        val apps = entries.flatMap { known(KnowledgeIndex.APP, it) }.toMutableSet()
+        val sites = entries.flatMap { known(KnowledgeIndex.SITE, it) }.toMutableSet()
+        // App 和网站知识互相登记的:B 站 App 写了 sites: [bilibili.com],站点写了 apps: [bilibili]
+        apps += sites.flatMap { s -> s.apps.flatMap { known(KnowledgeIndex.APP, it) } }
+        sites += apps.flatMap { a -> a.sites.flatMap { known(KnowledgeIndex.SITE, it) } }
+        val unresolved = entries.filter { e -> known(KnowledgeIndex.APP, e).isEmpty() && known(KnowledgeIndex.SITE, e).isEmpty() }.mapNotNull(::raw)
         return SkillPlaces(
-            packages = apps + rows.filter { it.kind == KnowledgeIndex.APP && it.name in apps }.flatMap { it.packages },
-            domains = sites + rows.filter { it.kind == KnowledgeIndex.SITE && it.name in sites }.flatMap { it.domains },
+            packages = apps.flatMap { it.packages }.toSet() + unresolved,
+            domains = sites.flatMap { it.domains }.toSet() + unresolved,
         )
     }
 

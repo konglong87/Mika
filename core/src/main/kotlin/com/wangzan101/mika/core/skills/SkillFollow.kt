@@ -27,17 +27,35 @@ object SkillFollow {
         it is RunEvent.ToolResult && it.atMs > at && tools.verb(it.tool) in ACTION_VERBS && !it.resultJson.contains("\"ok\":false")
     }
 
+    /**
+     * 读完之后进过技能写明的 App 或网站。地方从两处认:读到的界面(读屏记录),和每次调用结果里报的 `currentApp` / `currentSite`
+     * ——界面一个字也读不出来(自己画界面的 App)时没有读屏记录,结果里照样报着在哪个 App。
+     */
     private fun visitedAfter(events: List<RunEvent>, at: Long, places: SkillPlaces): Boolean {
         if (!places.declared) return true
+        val domains = places.domains.toList()
+        fun app(pkg: String) = pkg in places.packages
+        fun site(host: String) = SiteMatch.score(host, domains) != null
         return events.any { e ->
-            if (e !is RunEvent.Observed || e.atMs <= at) return@any false
-            val place = e.place ?: return@any false
-            when (place.kind) {
-                PlaceKind.App -> place.name in places.packages
-                PlaceKind.Site -> SiteMatch.score(place.name, places.domains.toList()) != null
-                PlaceKind.Page -> UrlHost.of(place.name)?.let { SiteMatch.score(it, places.domains.toList()) } != null
+            when {
+                e.atMs <= at -> false
+                e is RunEvent.Observed -> e.place?.let { place ->
+                    when (place.kind) {
+                        PlaceKind.App -> app(place.name)
+                        PlaceKind.Site -> site(place.name)
+                        PlaceKind.Page -> UrlHost.of(place.name)?.let(::site) == true
+                        else -> false
+                    }
+                } == true
+                e is RunEvent.ToolResult ->
+                    CURRENT_APP.findAll(e.resultJson).any { app(it.groupValues[1]) } ||
+                        CURRENT_SITE.findAll(e.resultJson).any { site(it.groupValues[1]) }
                 else -> false
             }
         }
     }
+
+    // 运行记录里的结果是截短过的 JSON 文本,不整段解析,只找这两个字段
+    private val CURRENT_APP = Regex(""""currentApp"\s*:\s*"([^"]+)"""")
+    private val CURRENT_SITE = Regex(""""currentSite"\s*:\s*"([^"]+)"""")
 }

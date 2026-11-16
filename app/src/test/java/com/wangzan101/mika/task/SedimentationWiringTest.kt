@@ -187,6 +187,15 @@ class SedimentationWiringTest {
         assertEquals(SkillStatus.active, late.get("wechat-msg")!!.status)
     }
 
+    // 读过一份没照着做、这次自己办成了:不记到它头上,也不挡起草
+    @Test fun skillReadButNotFollowedStillDrafts() {
+        val skill = PersonalSkill("wechat-msg", draftMd.replace("send-wechat-message", "wechat-msg"), SkillStatus.active, "r0", null, 0, emptyList())
+        val skills = MapSkills(skill)
+        runBlocking { learning(skills, learn = true).learn(after(events(extra = listOf(RunEvent.SkillUsed(41, "wechat-msg", "viewed")), app = "com.ss.android.ugc.aweme"))) }
+        assertEquals(emptyList<String>(), skills.get("wechat-msg")!!.outcomes)
+        assertEquals(listOf("draft-1"), skills.drafts.keys.toList())
+    }
+
     // 读了两份,只进过其中一份写明的 App:照着做的就是那一份,结果记给它
     @Test fun outcomeGoesToTheSkillWhoseAppWasUsed() {
         val md = draftMd.replace("send-wechat-message", "wechat-msg")
